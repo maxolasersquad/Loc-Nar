@@ -1,0 +1,4 @@
+shell=sh
+external-sources=true
+enable=quote-safe-variables
+enable=require-variable-braces
