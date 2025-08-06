@@ -106,7 +106,7 @@ get_specific_release_url() {
     query='.tarball_url'
   else
     # NOTE: This jq query is specific to lazygit's naming convention!
-    query='.assets[] | select(.name | contains("Linux_x86_64.tar.gz")) | .browser_download_url'
+    query='.assets[] | select(.name | contains("linux_x86_64.tar.gz")) | .browser_download_url'
   fi
 
   release_info_url="${github_api_url}/tags/${version}"
