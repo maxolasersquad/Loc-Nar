@@ -1,6 +1,6 @@
 #!/bin/sh
 
-github_api_url="https://api.github.com/repos/opencode-ai/opencode/releases"
+github_api_url="https://api.github.com/repos/sst/opencode/releases"
 jq_filter='.[].tag_name' # Extract all tag names
 
 if command -v curl >/dev/null 2>&1; then

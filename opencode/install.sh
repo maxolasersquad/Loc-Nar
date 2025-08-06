@@ -4,7 +4,7 @@ source_install=0
 version=""
 location_path=""
 verbose=0
-github_api_url="https://api.github.com/repos/opencode-ai/opencode/releases"
+github_api_url="https://api.github.com/repos/sst/opencode/releases"
 
 _log_msg() {
   if [ "${verbose}" -eq 1 ]; then
@@ -94,15 +94,13 @@ trap 'rm -rf "$tmp_dir"' EXIT
 _log_msg "Created temporary directory: ${tmp_dir}" >&2
 
 get_specific_release_url() {
-  # Removed non-POSIX 'local' keyword
   query=""
   _log_msg "Fetching release info for version: ${version}" >&2
 
   if [ "${source_install}" -eq 1 ]; then
     query='.tarball_url'
   else
-    # NOTE: This jq query is specific to opencode's naming convention!
-    query='.assets[] | select(.name | contains("linux-x86_64.tar.gz")) | .browser_download_url'
+    query='.assets[] | select(.name | contains("linux-x64.zip")) | .browser_download_url'
   fi
 
   release_info_url="${github_api_url}/tags/${version}"
@@ -166,7 +164,7 @@ download_and_install() {
   _log_msg "Download successful: ${download_file}" >&2
 
   _log_msg "Extracting archive ${download_file} to ${tmp_dir}" >&2
-  tar -xzf "${download_file}" -C "${tmp_dir}"
+  unzip -q "${download_file}" -d "${tmp_dir}"
   extract_status=$?
 
   if [ "${extract_status}" -ne 0 ]; then
