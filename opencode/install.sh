@@ -97,8 +97,16 @@ get_specific_release_url() {
   query=""
   _log_msg "Fetching release info for version: ${version}" >&2
 
+  clean_version="${version#v}"
+  use_tarball=0
+  if [ "$(printf '%s\n%s' "1.0.91" "${clean_version}" | sort -V | head -n1)" = "1.0.91" ]; then
+    use_tarball=1
+  fi
+
   if [ "${source_install}" -eq 1 ]; then
     query='.tarball_url'
+  elif [ "${use_tarball}" -eq 1 ]; then
+    query='.assets[] | select(.name | contains("linux-x64.tar.gz")) | .browser_download_url'
   else
     query='.assets[] | select(.name | contains("linux-x64.zip")) | .browser_download_url'
   fi
@@ -164,8 +172,20 @@ download_and_install() {
   _log_msg "Download successful: ${download_file}" >&2
 
   _log_msg "Extracting archive ${download_file} to ${tmp_dir}" >&2
-  unzip -q "${download_file}" -d "${tmp_dir}"
-  extract_status=$?
+  case "${download_file}" in
+    *.tar.gz|*.tgz)
+      tar -xzf "${download_file}" -C "${tmp_dir}"
+      extract_status=$?
+      ;;
+    *.zip)
+      unzip -q "${download_file}" -d "${tmp_dir}"
+      extract_status=$?
+      ;;
+    *)
+      _error_msg "Unknown archive format: ${download_file}"
+      extract_status=1
+      ;;
+  esac
 
   if [ "${extract_status}" -ne 0 ]; then
     _error_msg "Extraction failed for ${download_file} (Exit code: ${extract_status})."
