@@ -64,6 +64,16 @@ if [ "$(printf '%s\n%s' "0.0.52" "${clean_version}" | sort -V | tail -n1)" = "0.
   use_go=1
 fi
 
+# Detect if AVX2 is required (v1.1.52 and above)
+if [ "$(printf '%s\n%s' "1.1.52" "${clean_version}" | sort -V | tail -n1)" = "${clean_version}" ]; then
+  _log_msg "Checking for AVX2 support (required for v1.1.52+)…" >&2
+  if ! grep -q avx2 /proc/cpuinfo; then
+    _error_msg "Version ${version} and above requires a CPU with AVX2 support."
+    _error_msg "v1.1.51 is the last version supported on your hardware."
+    return 6
+  fi
+fi
+
 _log_msg "Checking dependencies…" >&2
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   _error_msg "Neither curl nor wget found. Cannot download releases."
