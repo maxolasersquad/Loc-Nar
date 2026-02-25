@@ -20,22 +20,20 @@ while [ $# -gt 0 ]; do
     shift
     ;;
   --location=*)
-    location_path="${1#--location=}"
-    if [ -z "${location_path}" ]; then
-      _error_msg "--location option requires a value after '='."
-      exit 1
-    fi
+    location_path="${1#*=}"
+    shift
+    ;;
+  --location)
+    location_path="${2}"
+    shift 2
+    ;;
+  --version=*)
+    version="${1#*=}"
     shift
     ;;
   --version)
-    if [ -n "${2}" ]; then
-      version="${2}"
-      shift
-      shift
-    else
-      _error_msg "--version option requires a version string."
-      exit 1
-    fi
+    version="${2}"
+    shift 2
     ;;
   --verbose)
     verbose=1
@@ -49,56 +47,55 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "${location_path}" ]; then
-  _error_msg "--location argument is required (was not parsed correctly)."
-  exit 1
+  _error_msg "--location argument is required."
+  return 1
 fi
 if [ -z "${version}" ]; then
-  _error_msg "--version argument is required (should be passed by trk)."
-  exit 1
+  _error_msg "--version argument is required."
+  return 1
 fi
 
 _log_msg "Checking dependencies…" >&2
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   _error_msg "Neither curl nor wget found. Cannot download releases."
-  exit 6
+  return 6
 fi
 if ! command -v jq >/dev/null 2>&1; then
   _error_msg "'jq' command not found. Cannot parse release information."
-  exit 6
+  return 6
 fi
 if ! command -v tar >/dev/null 2>&1; then
   _error_msg "'tar' command not found. Cannot extract archives."
-  exit 6
+  return 6
 fi
 if ! command -v install >/dev/null 2>&1; then
   _error_msg "'install' command not found."
-  exit 6
+  return 6
 fi
 if [ "${source_install}" -eq 1 ] && ! command -v go >/dev/null 2>&1; then
   _error_msg "'go' command not found. Cannot build from source."
-  exit 6
+  return 6
 fi
 _log_msg "Dependencies seem ok." >&2
 
 _log_msg "Ensuring installation directory exists: ${location_path}" >&2
 if ! mkdir -p "${location_path}"; then
   _error_msg "Failed to create installation directory: ${location_path}"
-  exit 7
+  return 7
 fi
 if [ ! -w "${location_path}" ]; then
   _error_msg "Installation directory is not writable: ${location_path}"
-  exit 7
+  return 7
 fi
 
 tmp_dir=$(mktemp -d /tmp/trk-lazygit-install-XXXXXX) || {
   _error_msg "Failed to create temporary directory."
-  exit 1
+  return 1
 }
 trap 'rm -rf "$tmp_dir"' EXIT
 _log_msg "Created temporary directory: ${tmp_dir}" >&2
 
 get_specific_release_url() {
-  # Removed non-POSIX 'local' keyword
   query=""
   _log_msg "Fetching release info for version: ${version}" >&2
 
@@ -138,7 +135,7 @@ get_specific_release_url() {
   if [ -z "${download_url}" ] || [ "${download_url}" = "null" ]; then
     _error_msg "Could not find a suitable download URL for lazygit version ${version} (source=${source_install})."
     _error_msg "Check if version exists and has the expected asset/tarball at GitHub."
-    exit 2
+    return 2
   fi
 
   printf '%s\n' "${download_url}"
@@ -160,12 +157,12 @@ download_and_install() {
     download_status=$?
   else
     _error_msg "Neither curl nor wget available for download."
-    exit 6
+    return 6
   fi
 
   if [ "${download_status}" -ne 0 ]; then
     _error_msg "Download failed from ${download_url} (Exit code: ${download_status})."
-    exit 3
+    return 3
   fi
   _log_msg "Download successful: ${download_file}" >&2
 
@@ -175,7 +172,7 @@ download_and_install() {
 
   if [ "${extract_status}" -ne 0 ]; then
     _error_msg "Extraction failed for ${download_file} (Exit code: ${extract_status})."
-    exit 4
+    return 4
   fi
   _log_msg "Extraction successful." >&2
 
@@ -185,7 +182,7 @@ download_and_install() {
 
     if [ -z "${LAZYGIT_BUILD_DIR}" ] || [ ! -d "${LAZYGIT_BUILD_DIR}" ]; then
       _error_msg "Could not find extracted source directory in ${tmp_dir}"
-      exit 4
+      return 4
     fi
     _log_msg "Found source directory: ${LAZYGIT_BUILD_DIR}" >&2
 
@@ -202,8 +199,8 @@ download_and_install() {
       install -m 755 "${LAZYGIT_BUILD_DIR}/lazygit" "${location_path}/"
       install_cmd_status=$?
     else
-      _error_msg "cargo build failed."
-      exit 5
+      _error_msg "go build failed."
+      return 5
     fi
 
   else
@@ -212,7 +209,7 @@ download_and_install() {
 
     if [ -z "${lazygit_binary}" ]; then
       _error_msg "Could not find 'lazygit' executable within extracted directory: ${tmp_dir}/"
-      exit 4
+      return 4
     fi
     _log_msg "Found binary: ${lazygit_binary}" >&2
 
@@ -222,7 +219,7 @@ download_and_install() {
 
   if [ "${install_cmd_status}" -ne 0 ]; then
     _error_msg "Failed to install binary to ${location_path}/ (Exit code: ${install_cmd_status})."
-    exit 1
+    return 1
   fi
 
   _log_msg "Binary installed successfully to ${location_path}/" >&2
@@ -231,8 +228,6 @@ download_and_install() {
 
 }
 
-release_url=$(get_specific_release_url)
+release_url=$(get_specific_release_url) || return $?
 
 download_and_install "${release_url}"
-
-exit 0

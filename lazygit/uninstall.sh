@@ -12,15 +12,13 @@ _error_msg() { printf 'UNINSTALLER ERROR: %s\n' "$*" >&2; }
 
 while [ $# -gt 0 ]; do
   case "${1}" in
+  --location=*)
+    location_path="${1#*=}"
+    shift
+    ;;
   --location)
-    if [ -n "${2}" ]; then
-      location_path="${2}"
-      shift
-      shift
-    else
-      _error_msg "--location option requires a path argument."
-      exit 1
-    fi
+    location_path="${2}"
+    shift 2
     ;;
   --verbose)
     verbose=1
@@ -34,8 +32,8 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "${location_path}" ]; then
-  _error_msg "--location argument is required (should be passed by trk)."
-  exit 1
+  _error_msg "--location argument is required."
+  return 1
 fi
 
 _log_msg "Running lazygit uninstall script for location: ${location_path}"
@@ -43,4 +41,3 @@ _log_msg "Running lazygit uninstall script for location: ${location_path}"
 _log_msg "No lazygit-specific external files to clean up."
 
 _log_msg "lazygit uninstall script finished."
-exit 0
