@@ -55,6 +55,15 @@ if [ -z "${version}" ]; then
   return 1
 fi
 
+# Detect if we should use Go or Bun based on the version number
+# Versions <= v0.0.52 were Go-based.
+# Versions >= v0.0.53 are Bun-based.
+use_go=0
+clean_version="${version#v}"
+if [ "$(printf '%s\n%s' "0.0.52" "${clean_version}" | sort -V | tail -n1)" = "0.0.52" ]; then
+  use_go=1
+fi
+
 _log_msg "Checking dependencies…" >&2
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   _error_msg "Neither curl nor wget found. Cannot download releases."
@@ -64,19 +73,33 @@ if ! command -v jq >/dev/null 2>&1; then
   _error_msg "'jq' command not found. Cannot parse release information."
   return 6
 fi
-if [ "${source_install}" -ne 1 ] && ! command -v tar >/dev/null 2>&1; then
-  _error_msg "'tar' command not found. Cannot extract archives."
-  return 6
-fi
-if [ "${source_install}" -eq 1 ] && ! command -v bun >/dev/null 2>&1; then
-  _error_msg "'bun' command not found."
-  return 6
-fi
-if [ "${source_install}" -eq 1 ]; then
-  bun_version=$(bun --version | sed 's/bun //')
-  if [ "$(printf '%s\n%s' "1.3.9" "${bun_version}" | sort -V | head -n1)" != "1.3.9" ]; then
-    _error_msg "Source install requires bun >= 1.3.9, but found ${bun_version}."
+
+if [ "${use_go}" -eq 1 ]; then
+  # Go-based dependencies
+  if [ "${source_install}" -ne 1 ] && ! command -v tar >/dev/null 2>&1; then
+    _error_msg "'tar' command not found. Cannot extract archives."
     return 6
+  fi
+  if [ "${source_install}" -eq 1 ] && ! command -v go >/dev/null 2>&1; then
+    _error_msg "'go' command not found. Required for source install of version ${version}."
+    return 6
+  fi
+else
+  # Bun-based dependencies
+  if [ "${source_install}" -ne 1 ] && ! command -v tar >/dev/null 2>&1 && ! command -v unzip >/dev/null 2>&1; then
+    _error_msg "Archive extraction tool (tar or unzip) not found."
+    return 6
+  fi
+  if [ "${source_install}" -eq 1 ] && ! command -v bun >/dev/null 2>&1; then
+    _error_msg "'bun' command not found. Required for source install of version ${version}."
+    return 6
+  fi
+  if [ "${source_install}" -eq 1 ]; then
+    bun_version=$(bun --version | sed 's/bun //')
+    if [ "$(printf '%s\n%s' "1.3.9" "${bun_version}" | sort -V | head -n1)" != "1.3.9" ]; then
+      _error_msg "Source install requires bun >= 1.3.9, but found ${bun_version}."
+      return 6
+    fi
   fi
 fi
 _log_msg "Dependencies seem ok." >&2
@@ -102,18 +125,24 @@ get_specific_release_url() {
   query=""
   _log_msg "Fetching release info for version: ${version}" >&2
 
-  clean_version="${version#v}"
-  use_tarball=0
-  if [ "$(printf '%s\n%s' "1.0.91" "${clean_version}" | sort -V | head -n1)" = "1.0.91" ]; then
-    use_tarball=1
-  fi
-
   if [ "${source_install}" -eq 1 ]; then
     query='.tarball_url'
-  elif [ "${use_tarball}" -eq 1 ]; then
-    query='.assets[] | select(.name | contains("linux-x64.tar.gz")) | .browser_download_url'
+  elif [ "${use_go}" -eq 1 ]; then
+    # Go versions used tar.gz with "linux-x86_64" in the name
+    query='.assets[] | select(.name | contains("linux-x86_64.tar.gz")) | .browser_download_url'
   else
-    query='.assets[] | select(.name | contains("linux-x64.zip")) | .browser_download_url'
+    # Bun versions used zip/tar.gz with "linux-x64"
+    clean_ver="${version#v}"
+    use_tarball=0
+    if [ "$(printf '%s\n%s' "1.0.91" "${clean_ver}" | sort -V | head -n1)" = "1.0.91" ]; then
+      use_tarball=1
+    fi
+
+    if [ "${use_tarball}" -eq 1 ]; then
+      query='.assets[] | select(.name | contains("linux-x64.tar.gz")) | .browser_download_url'
+    else
+      query='.assets[] | select(.name | contains("linux-x64.zip")) | .browser_download_url'
+    fi
   fi
 
   release_info_url="${github_api_url}/tags/${version}"
@@ -143,7 +172,7 @@ get_specific_release_url() {
   fi
 
   if [ -z "${download_url}" ] || [ "${download_url}" = "null" ]; then
-    _error_msg "Could not find a suitable download URL for opencode version ${version} (source=${source_install})."
+    _error_msg "Could not find a suitable download URL for opencode version ${version} (source=${source_install}, go=${use_go})."
     _error_msg "Check if version exists and has the expected asset/tarball at GitHub."
     return 2
   fi
@@ -156,7 +185,12 @@ download_and_install() {
   download_file=""
   install_cmd_status=1
 
-  download_file="${tmp_dir}/$(basename "${download_url}").tar.gz"
+  # Handle filename extension based on URL
+  case "${download_url}" in
+    *.zip) download_file="${tmp_dir}/$(basename "${download_url}")" ;;
+    *.tar.gz) download_file="${tmp_dir}/$(basename "${download_url}")" ;;
+    *) download_file="${tmp_dir}/$(basename "${download_url}").tar.gz" ;;
+  esac
 
   _log_msg "Downloading opencode from ${download_url}" >&2
   if command -v curl >/dev/null 2>&1; then
@@ -200,32 +234,58 @@ download_and_install() {
 
   if [ "${source_install}" -eq 1 ]; then
     _log_msg "Building opencode from source…" >&2
-    OPENCODE_BUILD_DIR=$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d -name "anomalyco-opencode-*" 2>/dev/null)
+    
+    if [ "${use_go}" -eq 1 ]; then
+      # Go build logic
+      OPENCODE_BUILD_DIR=$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d -name "*-opencode-*" 2>/dev/null)
+      if [ -z "${OPENCODE_BUILD_DIR}" ] || [ ! -d "${OPENCODE_BUILD_DIR}" ]; then
+        _error_msg "Could not find extracted source directory in ${tmp_dir}"
+        return 4
+      fi
+      _log_msg "Found source directory: ${OPENCODE_BUILD_DIR}" >&2
+      _log_msg "Running go build…" >&2
+      build_ok=0
+      ldflags="-s -w -X main.date=$(date -u +'%Y-%m-%dT%H:%M:%SZ') -X main.version=${version} -X main.buildSource=tarball"
+      if [ "${verbose}" -eq 1 ]; then
+        (cd "${OPENCODE_BUILD_DIR}" && go build -ldflags "${ldflags}" -o opencode) && build_ok=1
+      else
+        (cd "${OPENCODE_BUILD_DIR}" && go build -ldflags "${ldflags}" -o opencode) >/dev/null 2>&1 && build_ok=1
+      fi
 
-    if [ -z "${OPENCODE_BUILD_DIR}" ] || [ ! -d "${OPENCODE_BUILD_DIR}" ]; then
-      _error_msg "Could not find extracted source directory in ${tmp_dir}"
-      return 4
-    fi
-    _log_msg "Found source directory: ${OPENCODE_BUILD_DIR}" >&2
-
-    _log_msg "Installing dependencies with bun…" >&2
-    (cd "${OPENCODE_BUILD_DIR}" && bun install) >/dev/null 2>&1
-
-    _log_msg "Running bun build…" >&2
-    build_ok=0
-    if [ "${verbose}" -eq 1 ]; then
-      (cd "${OPENCODE_BUILD_DIR}/packages/opencode" && OPENCODE_VERSION="${version}" bun run build) && build_ok=1
+      if [ "${build_ok}" -eq 1 ]; then
+        _log_msg "Build successful. Installing…" >&2
+        install -m 755 "${OPENCODE_BUILD_DIR}/opencode" "${location_path}/"
+        install_cmd_status=$?
+      else
+        _error_msg "go build failed."
+        return 5
+      fi
     else
-      (cd "${OPENCODE_BUILD_DIR}/packages/opencode" && OPENCODE_VERSION="${version}" bun run build) >/dev/null 2>&1 && build_ok=1
-    fi
+      # Bun build logic
+      OPENCODE_BUILD_DIR=$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d -name "anomalyco-opencode-*" 2>/dev/null)
+      if [ -z "${OPENCODE_BUILD_DIR}" ] || [ ! -d "${OPENCODE_BUILD_DIR}" ]; then
+        _error_msg "Could not find extracted source directory in ${tmp_dir}"
+        return 4
+      fi
+      _log_msg "Found source directory: ${OPENCODE_BUILD_DIR}" >&2
+      _log_msg "Installing dependencies with bun…" >&2
+      (cd "${OPENCODE_BUILD_DIR}" && bun install) >/dev/null 2>&1
+      _log_msg "Running bun build…" >&2
+      build_ok=0
+      if [ "${verbose}" -eq 1 ]; then
+        (cd "${OPENCODE_BUILD_DIR}/packages/opencode" && OPENCODE_VERSION="${version}" bun run build) && build_ok=1
+      else
+        (cd "${OPENCODE_BUILD_DIR}/packages/opencode" && OPENCODE_VERSION="${version}" bun run build) >/dev/null 2>&1 && build_ok=1
+      fi
 
-    if [ "${build_ok}" -eq 1 ]; then
-      _log_msg "Build successful. Installing…" >&2
-      install -m 755 "${OPENCODE_BUILD_DIR}/packages/opencode/bin/opencode" "${location_path}/"
-      install_cmd_status=$?
-    else
-      _error_msg "bun build failed."
-      return 5
+      if [ "${build_ok}" -eq 1 ]; then
+        _log_msg "Build successful. Installing…" >&2
+        install -m 755 "${OPENCODE_BUILD_DIR}/packages/opencode/bin/opencode" "${location_path}/"
+        install_cmd_status=$?
+      else
+        _error_msg "bun build failed."
+        return 5
+      fi
     fi
 
   else
