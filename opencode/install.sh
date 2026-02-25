@@ -107,7 +107,8 @@ target_triple="${os}-${arch}"
 # Versions >= v0.0.53 are Bun-based (with asset jump to v0.1.30).
 use_go=0
 clean_version="${version#v}"
-if [ "$(printf '%s\n%s' "0.0.52" "${clean_version}" | sort -V | tail -n1)" = "0.0.52" ]; then
+# Use POSIX-compliant field-based sort for comparison
+if [ "$(printf '%s\n%s' "0.0.52" "${clean_version}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1)" = "0.0.52" ]; then
   use_go=1
 fi
 
