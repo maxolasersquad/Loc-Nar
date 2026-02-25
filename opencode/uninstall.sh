@@ -12,15 +12,13 @@ _error_msg() { printf 'UNINSTALLER ERROR: %s\n' "$*" >&2; }
 
 while [ $# -gt 0 ]; do
   case "${1}" in
+  --location=*)
+    location_path="${1#*=}"
+    shift
+    ;;
   --location)
-    if [ -n "${2}" ]; then
-      location_path="${2}"
-      shift
-      shift
-    else
-      _error_msg "--location option requires a path argument."
-      exit 1
-    fi
+    location_path="${2}"
+    shift 2
     ;;
   --verbose)
     verbose=1
@@ -34,16 +32,21 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "${location_path}" ]; then
-  _error_msg "--location argument is required (should be passed by trk)."
-  exit 1
+  _error_msg "--location argument is required."
+  return 1
 fi
 
 _log_msg "Running opencode uninstall script for location: ${location_path}"
 
-[ -f "${HOME}/.opencode.json" ] && rm "${HOME}/.opencode.json" &&
-  _log_msg "Removed ${HOME}"
-[ -f "${XDG_CONFIG_HOME}/.opencode.json" ] && rm "${XDG_CONFIG_HOME}/.opencode.json" &&
-  _log_msg "Removed ${XDG_CONFIG_HOME}"
+config_file="${HOME}/.opencode.json"
+if [ -f "${config_file}" ]; then
+  rm "${config_file}" && _log_msg "Removed config file: ${config_file}"
+fi
+
+xdg_config_dir="${XDG_CONFIG_HOME:-${HOME}/.config}"
+xdg_config_file="${xdg_config_dir}/.opencode.json"
+if [ -f "${xdg_config_file}" ]; then
+  rm "${xdg_config_file}" && _log_msg "Removed config file: ${xdg_config_file}"
+fi
 
 _log_msg "opencode uninstall script finished."
-exit 0
