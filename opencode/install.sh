@@ -64,12 +64,18 @@ if [ "$(printf '%s\n%s' "0.0.52" "${clean_version}" | sort -V | tail -n1)" = "0.
   use_go=1
 fi
 
-# Detect if AVX2 is required (v1.1.52 and above)
-if [ "$(printf '%s\n%s' "1.1.52" "${clean_version}" | sort -V | tail -n1)" = "${clean_version}" ]; then
-  _log_msg "Checking for AVX2 support (required for v1.1.52+)…" >&2
-  if ! grep -q avx2 /proc/cpuinfo; then
-    _error_msg "Version ${version} and above requires a CPU with AVX2 support."
-    _error_msg "v1.1.51 is the last version supported on your hardware."
+# Detect if AVX2 is supported
+has_avx2=1
+if ! grep -q avx2 /proc/cpuinfo; then
+  has_avx2=0
+fi
+
+# AVX2 requirement check for pre-compiled binaries (v1.1.52+)
+if [ "${has_avx2}" -eq 0 ] && [ "${source_install}" -eq 0 ]; then
+  if [ "$(printf '%s\n%s' "1.1.52" "${clean_version}" | sort -V | tail -n1)" = "${clean_version}" ]; then
+    _error_msg "Version ${version} pre-compiled binaries require a CPU with AVX2 support."
+    _error_msg "v1.1.51 is the last version with non-AVX2 binaries available."
+    _error_msg "Try installing from source with --source to build a baseline version."
     return 6
   fi
 fi
@@ -282,15 +288,46 @@ download_and_install() {
       (cd "${OPENCODE_BUILD_DIR}" && bun install) >/dev/null 2>&1
       _log_msg "Running bun build…" >&2
       build_ok=0
+      
+      build_args="--single"
+      if [ "${has_avx2}" -eq 0 ]; then
+        _log_msg "Enabling baseline build (no AVX2 support detected)" >&2
+        build_args="${build_args} --baseline"
+      fi
+
       if [ "${verbose}" -eq 1 ]; then
-        (cd "${OPENCODE_BUILD_DIR}/packages/opencode" && OPENCODE_VERSION="${version}" bun run build) && build_ok=1
+        (cd "${OPENCODE_BUILD_DIR}/packages/opencode" && OPENCODE_VERSION="${version}" bun run build ${build_args}) && build_ok=1
       else
-        (cd "${OPENCODE_BUILD_DIR}/packages/opencode" && OPENCODE_VERSION="${version}" bun run build) >/dev/null 2>&1 && build_ok=1
+        (cd "${OPENCODE_BUILD_DIR}/packages/opencode" && OPENCODE_VERSION="${version}" bun run build ${build_args}) >/dev/null 2>&1 && build_ok=1
       fi
 
       if [ "${build_ok}" -eq 1 ]; then
         _log_msg "Build successful. Installing…" >&2
-        install -m 755 "${OPENCODE_BUILD_DIR}/packages/opencode/bin/opencode" "${location_path}/"
+        
+        # Binary name might change if built with --baseline
+        # The build script produces dist/opencode-<os>-<arch>[-baseline][-musl]/bin/opencode
+        if [ "${has_avx2}" -eq 0 ]; then
+          # Prefer baseline without musl if we are on a glibc system
+          if ldd --version 2>&1 | grep -qi glibc; then
+            bin_path=$(find "${OPENCODE_BUILD_DIR}/packages/opencode/dist" -path "*/opencode-linux-x64-baseline/bin/opencode" -type f -executable 2>/dev/null | head -n 1)
+          else
+            bin_path=$(find "${OPENCODE_BUILD_DIR}/packages/opencode/dist" -path "*/opencode-linux-x64-baseline-musl/bin/opencode" -type f -executable 2>/dev/null | head -n 1)
+          fi
+        else
+          bin_path="${OPENCODE_BUILD_DIR}/packages/opencode/bin/opencode"
+        fi
+        
+        if [ -z "${bin_path}" ] || [ ! -f "${bin_path}" ]; then
+           # Fallback to searching anywhere in dist
+           bin_path=$(find "${OPENCODE_BUILD_DIR}/packages/opencode/dist" -name opencode -type f -executable 2>/dev/null | head -n 1)
+        fi
+        
+        if [ -z "${bin_path}" ] || [ ! -f "${bin_path}" ]; then
+           # Final fallback
+           bin_path="${OPENCODE_BUILD_DIR}/packages/opencode/bin/opencode"
+        fi
+
+        install -m 755 "${bin_path}" "${location_path}/"
         install_cmd_status=$?
       else
         _error_msg "bun build failed."
