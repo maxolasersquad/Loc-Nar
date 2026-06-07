@@ -66,8 +66,8 @@ esac
 
 arch=$(uname -m)
 case "${arch}" in
-  aarch64) arch="arm64" ;;
-  x86_64) arch="x64" ;;
+  aarch64|arm64) arch="arm64" ;;
+  x86_64|amd64) arch="x64" ;;
 esac
 
 # Rosetta 2 detection on Darwin
@@ -166,15 +166,31 @@ get_specific_release_url() {
 
   if [ "${source_install}" -eq 1 ]; then
     query='.tarball_url'
-  elif [ "${use_go}" -eq 1 ]; then
-    # Legacy Go-based naming
-    query='.assets[] | select(.name | contains("linux-x86_64.tar.gz")) | .browser_download_url'
   else
-    # Bun-based naming using target_triple logic from official installer
-    archive_ext=".zip"
-    [ "${os}" = "linux" ] && archive_ext=".tar.gz"
-    
-    query=".assets[] | select(.name | contains(\"${target_triple}${archive_ext}\")) | .browser_download_url"
+    # Supported binary OS/arch combinations
+    is_supported=0
+    case "${os}" in
+      darwin|linux|windows)
+        case "${arch}" in
+          x64|arm64) is_supported=1 ;;
+        esac
+        ;;
+    esac
+    if [ "${is_supported}" -eq 0 ]; then
+      _error_msg "Unsupported OS/architecture combo: ${os}/${arch}"
+      _error_msg "You can build from source using the --source option if you have the required build tools (go/bun)."
+      return 6
+    fi
+
+    if [ "${use_go}" -eq 1 ]; then
+      # Legacy Go-based naming
+      query='.assets[] | select(.name | contains("linux-x86_64.tar.gz")) | .browser_download_url'
+    else
+      # Bun-based naming using target_triple logic from official installer
+      archive_ext=".zip"
+      [ "${os}" = "linux" ] && archive_ext=".tar.gz"
+      query=".assets[] | select(.name | contains(\"${target_triple}${archive_ext}\")) | .browser_download_url"
+    fi
   fi
 
   release_info_url="${github_api_url}/tags/${version}"

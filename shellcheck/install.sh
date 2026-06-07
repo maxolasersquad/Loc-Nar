@@ -96,9 +96,16 @@ if [ "${source_install}" -eq 1 ]; then
     return 6
   fi
 else
-  if ! command -v tar >/dev/null 2>&1 && ! command -v unzip >/dev/null 2>&1; then
-    _error_msg "Archive extraction tool (tar or unzip) not found."
-    return 6
+  if [ "${os}" = "windows" ]; then
+    if ! command -v unzip >/dev/null 2>&1; then
+      _error_msg "'unzip' command not found. Required to extract zip archives."
+      return 6
+    fi
+  else
+    if ! command -v tar >/dev/null 2>&1; then
+      _error_msg "'tar' command not found. Required to extract tar archives."
+      return 6
+    fi
   fi
 fi
 if ! command -v install >/dev/null 2>&1; then
@@ -131,6 +138,24 @@ get_specific_release_url() {
   if [ "${source_install}" -eq 1 ]; then
     query='.tarball_url'
   else
+    # Supported binary OS/arch combinations
+    is_supported=0
+    case "${os}" in
+      darwin|linux)
+        case "${arch}" in
+          aarch64|x86_64) is_supported=1 ;;
+        esac
+        ;;
+      windows)
+        is_supported=1
+        ;;
+    esac
+    if [ "${is_supported}" -eq 0 ]; then
+      _error_msg "Unsupported OS/architecture combo: ${os}/${arch}"
+      _error_msg "You can build from source using the --source option if you have the required build tools (cabal, ghc)."
+      return 6
+    fi
+
     ext=".tar.gz"
     if [ "${os}" = "windows" ]; then
       ext=".zip"

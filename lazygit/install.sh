@@ -55,6 +55,29 @@ if [ -z "${version}" ]; then
   return 1
 fi
 
+# --- Hardware & OS Detection ---
+raw_os=$(uname -s)
+os=$(printf '%s' "${raw_os}" | tr '[:upper:]' '[:lower:]')
+case "${raw_os}" in
+  Darwin*) os="darwin" ;;
+  Linux*) os="linux" ;;
+  MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+  FreeBSD*) os="freebsd" ;;
+esac
+
+arch=$(uname -m)
+case "${arch}" in
+  aarch64|arm64) arch="arm64" ;;
+  x86_64|amd64) arch="x86_64" ;;
+esac
+
+# Rosetta 2 detection on Darwin
+if [ "${os}" = "darwin" ] && [ "${arch}" = "x86_64" ]; then
+  if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+    arch="arm64"
+  fi
+fi
+
 _log_msg "Checking dependencies…" >&2
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   _error_msg "Neither curl nor wget found. Cannot download releases."
@@ -64,17 +87,31 @@ if ! command -v jq >/dev/null 2>&1; then
   _error_msg "'jq' command not found. Cannot parse release information."
   return 6
 fi
-if ! command -v tar >/dev/null 2>&1; then
-  _error_msg "'tar' command not found. Cannot extract archives."
-  return 6
-fi
 if ! command -v install >/dev/null 2>&1; then
   _error_msg "'install' command not found."
   return 6
 fi
-if [ "${source_install}" -eq 1 ] && ! command -v go >/dev/null 2>&1; then
-  _error_msg "'go' command not found. Cannot build from source."
-  return 6
+if [ "${source_install}" -eq 1 ]; then
+  if ! command -v go >/dev/null 2>&1; then
+    _error_msg "'go' command not found. Required for source install."
+    return 6
+  fi
+  if ! command -v tar >/dev/null 2>&1; then
+    _error_msg "'tar' command not found. Required for source install."
+    return 6
+  fi
+else
+  if [ "${os}" = "windows" ]; then
+    if ! command -v unzip >/dev/null 2>&1; then
+      _error_msg "'unzip' command not found. Required to extract zip archives."
+      return 6
+    fi
+  else
+    if ! command -v tar >/dev/null 2>&1; then
+      _error_msg "'tar' command not found. Required to extract tar archives."
+      return 6
+    fi
+  fi
 fi
 _log_msg "Dependencies seem ok." >&2
 
@@ -102,8 +139,26 @@ get_specific_release_url() {
   if [ "${source_install}" -eq 1 ]; then
     query='.tarball_url'
   else
-    # NOTE: This jq query is specific to lazygit's naming convention!
-    query='.assets[] | select(.name | contains("linux_x86_64.tar.gz")) | .browser_download_url'
+    # Supported binary OS/arch combinations
+    is_supported=0
+    case "${os}" in
+      darwin|linux|windows|freebsd)
+        case "${arch}" in
+          x86_64|arm64) is_supported=1 ;;
+        esac
+        ;;
+    esac
+    if [ "${is_supported}" -eq 0 ]; then
+      _error_msg "Unsupported OS/architecture combo: ${os}/${arch}"
+      _error_msg "You can build from source using the --source option if you have the required build tools (go)."
+      return 6
+    fi
+
+    ext=".tar.gz"
+    if [ "${os}" = "windows" ]; then
+      ext=".zip"
+    fi
+    query=".assets[] | select(.name | contains(\"${os}_${arch}\") and endswith(\"${ext}\")) | .browser_download_url"
   fi
 
   release_info_url="${github_api_url}/tags/${version}"
@@ -133,7 +188,7 @@ get_specific_release_url() {
   fi
 
   if [ -z "${download_url}" ] || [ "${download_url}" = "null" ]; then
-    _error_msg "Could not find a suitable download URL for lazygit version ${version} (source=${source_install})."
+    _error_msg "Could not find a suitable download URL for lazygit version ${version} (os=${os}, arch=${arch}, source=${source_install})."
     _error_msg "Check if version exists and has the expected asset/tarball at GitHub."
     return 2
   fi
@@ -167,8 +222,17 @@ download_and_install() {
   _log_msg "Download successful: ${download_file}" >&2
 
   _log_msg "Extracting archive ${download_file} to ${tmp_dir}" >&2
-  tar -xzf "${download_file}" -C "${tmp_dir}"
-  extract_status=$?
+  extract_status=1
+  case "${download_file}" in
+    *.zip)
+      unzip -q "${download_file}" -d "${tmp_dir}"
+      extract_status=$?
+      ;;
+    *)
+      tar -xzf "${download_file}" -C "${tmp_dir}"
+      extract_status=$?
+      ;;
+  esac
 
   if [ "${extract_status}" -ne 0 ]; then
     _error_msg "Extraction failed for ${download_file} (Exit code: ${extract_status})."
@@ -205,7 +269,7 @@ download_and_install() {
 
   else
     _log_msg "Installing pre-compiled lazygit binary…" >&2
-    lazygit_binary=$(find "${tmp_dir}" -name lazygit -type f -executable 2>/dev/null | head -n 1)
+    lazygit_binary=$(find "${tmp_dir}" \( -name lazygit -o -name lazygit.exe \) -type f | head -n 1)
 
     if [ -z "${lazygit_binary}" ]; then
       _error_msg "Could not find 'lazygit' executable within extracted directory: ${tmp_dir}/"
@@ -213,7 +277,9 @@ download_and_install() {
     fi
     _log_msg "Found binary: ${lazygit_binary}" >&2
 
-    install -m 755 "${lazygit_binary}" "${location_path}/"
+    dest_name="lazygit"
+    [ "${os}" = "windows" ] && dest_name="lazygit.exe"
+    install -m 755 "${lazygit_binary}" "${location_path}/${dest_name}"
     install_cmd_status=$?
   fi
 
@@ -224,7 +290,11 @@ download_and_install() {
 
   _log_msg "Binary installed successfully to ${location_path}/" >&2
 
-  printf '%s\n' "lazygit"
+  if [ "${os}" = "windows" ]; then
+    printf '%s\n' "lazygit.exe"
+  else
+    printf '%s\n' "lazygit"
+  fi
 
 }
 

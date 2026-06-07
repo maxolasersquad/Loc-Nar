@@ -91,9 +91,13 @@ if [ "${source_install}" -eq 1 ]; then
     _error_msg "'go' command not found. Required for source install."
     return 6
   fi
+  if ! command -v tar >/dev/null 2>&1; then
+    _error_msg "'tar' command not found. Required to extract source archive."
+    return 6
+  fi
 else
-  if ! command -v tar >/dev/null 2>&1 && ! command -v unzip >/dev/null 2>&1; then
-    _error_msg "Archive extraction tool (tar or unzip) not found."
+  if ! command -v tar >/dev/null 2>&1; then
+    _error_msg "'tar' command not found. Required to extract tar archives."
     return 6
   fi
 fi
@@ -127,10 +131,27 @@ get_specific_release_url() {
   if [ "${source_install}" -eq 1 ]; then
     query='.tarball_url'
   else
-    ext=".tar.gz"
-    if [ "${os}" = "windows" ]; then
-      ext=".zip"
+    # Supported binary OS/arch combinations
+    is_supported=0
+    case "${os}" in
+      darwin|linux)
+        case "${arch}" in
+          amd64|arm64) is_supported=1 ;;
+        esac
+        ;;
+      windows)
+        case "${arch}" in
+          amd64) is_supported=1 ;;
+        esac
+        ;;
+    esac
+    if [ "${is_supported}" -eq 0 ]; then
+      _error_msg "Unsupported OS/architecture combo: ${os}/${arch}"
+      _error_msg "You can build from source using the --source option if you have the required build tools (go)."
+      return 6
     fi
+
+    ext=".tar.gz"
     query=".assets[] | select(.name | contains(\"${os}\") and contains(\"${arch}\") and endswith(\"${ext}\")) | .browser_download_url"
   fi
 

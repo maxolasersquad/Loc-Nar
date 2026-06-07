@@ -127,6 +127,21 @@ get_specific_release_url() {
   if [ "${source_install}" -eq 1 ]; then
     query='.tarball_url'
   else
+    # Supported binary OS/arch combinations
+    is_supported=0
+    case "${os}" in
+      Darwin|Linux|Windows|Freebsd)
+        case "${arch}" in
+          amd64|arm64) is_supported=1 ;;
+        esac
+        ;;
+    esac
+    if [ "${is_supported}" -eq 0 ]; then
+      _error_msg "Unsupported OS/architecture combo: ${os}/${arch}"
+      _error_msg "You can build from source using the --source option if you have the required build tools (go)."
+      return 6
+    fi
+
     ext=".tar.gz"
     if [ "${os}" = "Windows" ]; then
       ext=".zip"

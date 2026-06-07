@@ -56,6 +56,28 @@ if [ -z "${version}" ]; then
   return 1
 fi
 
+# --- Hardware & OS Detection ---
+raw_os=$(uname -s)
+os=$(printf '%s' "${raw_os}" | tr '[:upper:]' '[:lower:]')
+case "${raw_os}" in
+  Darwin*) os="darwin" ;;
+  Linux*) os="linux" ;;
+  MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+esac
+
+arch=$(uname -m)
+case "${arch}" in
+  aarch64|arm64) arch="arm64" ;;
+  x86_64|amd64) arch="amd64" ;;
+esac
+
+# Rosetta 2 detection on Darwin
+if [ "${os}" = "darwin" ] && [ "${arch}" = "amd64" ]; then
+  if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+    arch="arm64"
+  fi
+fi
+
 _log_msg "Checking dependencies…" >&2
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   _error_msg "Neither curl nor wget found. Cannot download releases."
@@ -90,9 +112,38 @@ _log_msg "Created temporary directory: ${tmp_dir}" >&2
 
 get_release_url() {
   _log_msg "Fetching release info for version: ${version}" >&2
+
+  if [ "${source_install}" -eq 1 ]; then
+    _error_msg "This package does not support source installation."
+    return 6
+  fi
+
+  # Supported binary OS/arch combinations
+  is_supported=0
+  case "${os}" in
+    darwin)
+      case "${arch}" in
+        amd64|arm64) is_supported=1 ;;
+      esac
+      ;;
+    linux|windows)
+      case "${arch}" in
+        amd64|arm64) is_supported=1 ;;
+      esac
+      ;;
+  esac
+
+  if [ "${is_supported}" -eq 0 ]; then
+    _error_msg "Unsupported OS/architecture combo: ${os}/${arch}"
+    _error_msg "This package does not support source installation."
+    return 6
+  fi
   
-  # Try both old and new naming patterns
-  query='.assets[] | select(.name | endswith(".tar.gz")) | select(.name | contains("linux_amd64")) | .browser_download_url'
+  if [ "${os}" = "darwin" ]; then
+    query='.assets[] | select(.name | contains("darwin") and contains("all") and endswith(".tar.gz")) | .browser_download_url'
+  else
+    query=".assets[] | select(.name | contains(\"${os}\") and contains(\"${arch}\") and endswith(\".tar.gz\")) | .browser_download_url"
+  fi
   
   release_info_url="${github_api_url}/tags/${version}"
   release_json=""
@@ -109,7 +160,7 @@ get_release_url() {
   fi
 
   if [ -z "${download_url}" ] || [ "${download_url}" = "null" ]; then
-    _error_msg "Could not find a suitable download URL for obsidian-cli version ${version}."
+    _error_msg "Could not find a suitable download URL for obsidian-cli version ${version} (os=${os}, arch=${arch})."
     return 2
   fi
 
@@ -146,8 +197,8 @@ download_and_install() {
     return 4
   fi
   
-  # Find the executable. It might be named 'obsidian-cli' or 'notesmd-cli'
-  extracted_bin=$(find "${tmp_dir}" -maxdepth 2 -type f -executable ! -name "checksums.txt" ! -name "*.sh" | head -n 1)
+  # Find the executable. It might be named 'obsidian-cli', 'notesmd-cli', or have a .exe suffix on Windows
+  extracted_bin=$(find "${tmp_dir}" -maxdepth 2 -type f \( -name "obsidian-cli*" -o -name "notesmd-cli*" \) ! -name "checksums.txt" ! -name "*.sh" | head -n 1)
   
   if [ -z "${extracted_bin}" ]; then
     _error_msg "Could not find an executable within extracted directory."

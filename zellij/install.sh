@@ -149,6 +149,7 @@ get_specific_release_url() {
   else
     if [ -z "${target_str}" ]; then
       _error_msg "Unsupported OS/architecture combo: ${os}/${arch}"
+      _error_msg "You can build from source using the --source option if you have the required build tools (cargo)."
       return 6
     fi
     ext=".tar.gz"
