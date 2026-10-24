@@ -289,18 +289,28 @@ resolve_and_print_executable() {
     return 4
   fi
 
-  # Create desktop entry for application menu integration
-  mkdir -p "${location_path}/share/applications"
+  # Create desktop entry and icon for application menu integration
+  mkdir -p "${location_path}/share/applications" "${location_path}/share/icons/hicolor/256x256/apps"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sL "https://i.imgur.com/CgpwyIQ.png" -o "${location_path}/share/icons/hicolor/256x256/apps/classicuo.png" 2>/dev/null || true
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "${location_path}/share/icons/hicolor/256x256/apps/classicuo.png" "https://i.imgur.com/CgpwyIQ.png" 2>/dev/null || true
+  fi
+
   cat <<'EOF' > "${location_path}/share/applications/classicuo.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=ClassicUO
-Comment=Ultima Online Classic Client
+GenericName=Ultima Online Client
+Comment=An open source implementation of the Ultima Online Classic Client
 Exec=classicuo %U
-Icon=applications-games
+Icon=classicuo
 Terminal=false
 Categories=Game;RolePlaying;
+Keywords=Ultima;Online;UO;ClassicUO;RPG;MMO;
+StartupNotify=true
+StartupWMClass=ClassicUO
 EOF
 
   _log_msg "ClassicUO installed successfully to ${location_path}/" >&2
