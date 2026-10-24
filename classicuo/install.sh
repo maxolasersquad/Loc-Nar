@@ -289,13 +289,20 @@ resolve_and_print_executable() {
     return 4
   fi
 
-  # Create desktop entry and icon for application menu integration
-  mkdir -p "${location_path}/share/applications" "${location_path}/share/icons/hicolor/256x256/apps"
+  # Create desktop entry and icons for application menu integration
+  mkdir -p "${location_path}/share/applications" \
+           "${location_path}/share/icons/hicolor/256x256/apps" \
+           "${location_path}/share/icons/hicolor/512x512/apps" \
+           "${location_path}/share/pixmaps"
   if command -v curl >/dev/null 2>&1; then
-    curl -sL "https://i.imgur.com/CgpwyIQ.png" -o "${location_path}/share/icons/hicolor/256x256/apps/classicuo.png" 2>/dev/null || true
+    curl -sL "https://i.imgur.com/CgpwyIQ.png" -o "${location_path}/share/icons/hicolor/512x512/apps/classicuo.png" 2>/dev/null || true
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "${location_path}/share/icons/hicolor/256x256/apps/classicuo.png" "https://i.imgur.com/CgpwyIQ.png" 2>/dev/null || true
+    wget -qO "${location_path}/share/icons/hicolor/512x512/apps/classicuo.png" "https://i.imgur.com/CgpwyIQ.png" 2>/dev/null || true
   fi
+
+  # Mirror to 256x256 and pixmaps for maximum launcher compatibility
+  cp "${location_path}/share/icons/hicolor/512x512/apps/classicuo.png" "${location_path}/share/icons/hicolor/256x256/apps/classicuo.png" 2>/dev/null || true
+  cp "${location_path}/share/icons/hicolor/512x512/apps/classicuo.png" "${location_path}/share/pixmaps/classicuo.png" 2>/dev/null || true
 
   cat <<'EOF' > "${location_path}/share/applications/classicuo.desktop"
 [Desktop Entry]
