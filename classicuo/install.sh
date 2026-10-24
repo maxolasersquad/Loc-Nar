@@ -301,14 +301,14 @@ resolve_and_print_executable() {
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=ClassicUO
-GenericName=Ultima Online Client
+Name=Ultima Online (Classic Edition)
+GenericName=ClassicUO Client
 Comment=An open source implementation of the Ultima Online Classic Client
 Exec=classicuo %U
 Icon=classicuo
 Terminal=false
 Categories=Game;RolePlaying;
-Keywords=Ultima;Online;UO;ClassicUO;RPG;MMO;
+Keywords=Ultima;Online;UO;Classic;ClassicUO;RPG;MMO;
 StartupNotify=true
 StartupWMClass=ClassicUO
 EOF
