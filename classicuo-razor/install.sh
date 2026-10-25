@@ -60,12 +60,8 @@ if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   _error_msg "Neither curl nor wget found."
   return 6
 fi
-if ! command -v jq >/dev/null 2>&1; then
-  _error_msg "'jq' command not found."
-  return 6
-fi
-if ! command -v unzip >/dev/null 2>&1; then
-  _error_msg "'unzip' command not found."
+if ! command -v unzip >/dev/null 2>&1 && ! command -v bsdtar >/dev/null 2>&1 && ! command -v tar >/dev/null 2>&1; then
+  _error_msg "Neither 'unzip', 'bsdtar', nor 'tar' found. Required to extract zip archives."
   return 6
 fi
 
@@ -129,8 +125,23 @@ elif command -v wget >/dev/null 2>&1; then
 fi
 
 _log_msg "Extracting Razor archive..." >&2
-if ! unzip -q -o "${archive_file}" -d "${location_path}"; then
-  _error_msg "Extraction failed for ${archive_file}."
+if command -v unzip >/dev/null 2>&1; then
+  if ! unzip -q -o "${archive_file}" -d "${location_path}"; then
+    _error_msg "Extraction failed for ${archive_file}."
+    return 4
+  fi
+elif command -v bsdtar >/dev/null 2>&1; then
+  if ! bsdtar -xf "${archive_file}" -C "${location_path}"; then
+    _error_msg "Extraction failed for ${archive_file}."
+    return 4
+  fi
+elif command -v tar >/dev/null 2>&1; then
+  if ! tar -xf "${archive_file}" -C "${location_path}"; then
+    _error_msg "Extraction failed for ${archive_file}."
+    return 4
+  fi
+else
+  _error_msg "No tool available to extract zip archive (unzip, bsdtar, tar)."
   return 4
 fi
 

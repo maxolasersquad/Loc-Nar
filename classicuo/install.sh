@@ -95,12 +95,8 @@ else
     _error_msg "Neither curl nor wget found. Cannot download releases."
     return 6
   fi
-  if ! command -v jq >/dev/null 2>&1; then
-    _error_msg "'jq' command not found. Cannot parse release information."
-    return 6
-  fi
-  if ! command -v unzip >/dev/null 2>&1; then
-    _error_msg "'unzip' command not found. Required to extract zip archives."
+  if ! command -v unzip >/dev/null 2>&1 && ! command -v bsdtar >/dev/null 2>&1 && ! command -v tar >/dev/null 2>&1; then
+    _error_msg "Neither 'unzip', 'bsdtar', nor 'tar' found. Required to extract zip archives."
     return 6
   fi
 fi
@@ -152,7 +148,18 @@ get_release_download_url() {
   fi
 
   if [ -n "${release_json}" ]; then
-    download_url=$(printf '%s' "${release_json}" | jq -r ".assets[] | select(.name == \"${asset_name}\") | .browser_download_url" 2>/dev/null | head -n 1)
+    if command -v jq >/dev/null 2>&1; then
+      download_url=$(printf '%s' "${release_json}" | jq -r ".assets[] | select(.name == \"${asset_name}\") | .browser_download_url" 2>/dev/null | head -n 1)
+    else
+      download_url=$(printf '%s' "${release_json}" | awk -v asset="${asset_name}" '
+        $0 ~ "\"name\": *\"" asset "\"" { found=1 }
+        found && /"browser_download_url":/ {
+          match($0, /"browser_download_url": *"([^"]+)"/, arr)
+          print arr[1]
+          exit
+        }
+      ')
+    fi
   fi
 
   if [ -z "${download_url}" ] || [ "${download_url}" = "null" ]; then
@@ -184,8 +191,23 @@ download_and_install_binary() {
   _log_msg "Extracting archive..." >&2
   extracted_dir="${tmp_dir}/extracted"
   mkdir -p "${extracted_dir}"
-  if ! unzip -q "${archive_file}" -d "${extracted_dir}"; then
-    _error_msg "Extraction failed for ${archive_file}."
+  if command -v unzip >/dev/null 2>&1; then
+    if ! unzip -q "${archive_file}" -d "${extracted_dir}"; then
+      _error_msg "Extraction failed for ${archive_file}."
+      return 4
+    fi
+  elif command -v bsdtar >/dev/null 2>&1; then
+    if ! bsdtar -xf "${archive_file}" -C "${extracted_dir}"; then
+      _error_msg "Extraction failed for ${archive_file}."
+      return 4
+    fi
+  elif command -v tar >/dev/null 2>&1; then
+    if ! tar -xf "${archive_file}" -C "${extracted_dir}"; then
+      _error_msg "Extraction failed for ${archive_file}."
+      return 4
+    fi
+  else
+    _error_msg "No tool available to extract zip archive (unzip, bsdtar, tar)."
     return 4
   fi
   _log_msg "Extraction successful." >&2
